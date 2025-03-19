@@ -1,8 +1,12 @@
-from typing import Annotated, List, TypedDict, Literal
+from typing import Annotated, List, TypedDict, Literal, Sequence
 from pydantic import BaseModel, Field
 import operator
 
-class Section(BaseModel):
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
+
+class Section(BaseModel): 
+    # can't add messages - llm structured output used and not expecting it
     name: str = Field(
         description="Name for this section of the report.",
     )
@@ -38,12 +42,15 @@ class Feedback(BaseModel):
     )
 
 class ReportStateInput(TypedDict):
+    messages: Annotated[Sequence[BaseMessage], add_messages]
     topic: str # Report topic
     
 class ReportStateOutput(TypedDict):
+    messages: Annotated[Sequence[BaseMessage], add_messages]
     final_report: str # Final report
 
 class ReportState(TypedDict):
+    messages: Annotated[Sequence[BaseMessage], add_messages]
     topic: str # Report topic    
     feedback_on_report_plan: str # Feedback on the report plan
     sections: list[Section] # List of report sections 
@@ -52,6 +59,7 @@ class ReportState(TypedDict):
     final_report: str # Final report
 
 class SectionState(TypedDict):
+    messages: Annotated[Sequence[BaseMessage], add_messages]
     topic: str # Report topic
     section: Section # Report section  
     search_iterations: int # Number of search iterations done
@@ -61,4 +69,5 @@ class SectionState(TypedDict):
     completed_sections: list[Section] # Final key we duplicate in outer state for Send() API
 
 class SectionOutputState(TypedDict):
+    messages: Annotated[Sequence[BaseMessage], add_messages]
     completed_sections: list[Section] # Final key we duplicate in outer state for Send() API

@@ -1,7 +1,7 @@
 from typing import Literal
 
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
 
 from langgraph.constants import Send
@@ -64,7 +64,8 @@ async def generate_report_plan(state: ReportState, config: RunnableConfig):
     """
 
     # Inputs
-    topic = state["topic"]
+    messages = state["messages"]
+    topic = messages[-1].content
     feedback = state.get("feedback_on_report_plan", None)
 
     # Get configuration
@@ -130,7 +131,11 @@ async def generate_report_plan(state: ReportState, config: RunnableConfig):
     # Get sections
     sections = report_sections.sections
 
-    return {"sections": sections}
+    return {
+        "messages": [AIMessage(content=str(report_sections))], # needed - without it human_feedback is not showing 
+        "topic": topic,
+        "sections": sections
+    }
 
 def human_feedback(
     state: ReportState, config: RunnableConfig
@@ -473,7 +478,7 @@ def compile_final_report(state: ReportState):
     # Compile final report
     all_sections = "\n\n".join([s.content for s in sections])
 
-    return {"final_report": all_sections}
+    return {"messages": [AIMessage(content=str(all_sections))], "final_report": all_sections}
 
 def initiate_final_section_writing(state: ReportState):
     """Create parallel tasks for writing non-research sections.
