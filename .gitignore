@@ -1,0 +1,5 @@
+open_deep_research.egg-info/
+.env
+.langgraph_api/
+.vscode/
+__pycache__/

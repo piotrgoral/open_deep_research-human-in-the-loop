@@ -8,13 +8,6 @@ from langgraph.constants import Send
 from langgraph.graph import START, END, StateGraph
 from langgraph.types import interrupt, Command
 
-from langgraph.prebuilt.interrupt import (
-    ActionRequest,
-    HumanInterrupt,
-    HumanInterruptConfig,
-    HumanResponse,
-)
-
 from open_deep_research.state import (
     ReportStateInput,
     ReportStateOutput,
@@ -132,29 +125,27 @@ async def generate_report_plan(state: ReportState, config: RunnableConfig):
 
     return {"sections": sections}
 
-def human_feedback(
-    state: ReportState, config: RunnableConfig
-) -> Command[Literal["generate_report_plan", "build_section_with_web_research"]]:
+def human_feedback(state: ReportState, config: RunnableConfig) -> Command[Literal["generate_report_plan","build_section_with_web_research"]]:
     """Get human feedback on the report plan and route to next steps.
-
+    
     This node:
     1. Formats the current report plan for human review
     2. Gets feedback via an interrupt
     3. Routes to either:
        - Section writing if plan is approved
        - Plan regeneration if feedback is provided
-
+    
     Args:
         state: Current graph state with sections to review
         config: Configuration for the workflow
-
+        
     Returns:
         Command to either regenerate plan or start section writing
     """
 
     # Get sections
     topic = state["topic"]
-    sections = state["sections"]
+    sections = state['sections']
     sections_str = "\n\n".join(
         f"Section: {section.name}\n"
         f"Description: {section.description}\n"
@@ -166,68 +157,25 @@ def human_feedback(
     interrupt_message = f"""Please provide feedback on the following report plan. 
                         \n\n{sections_str}\n
                         \nDoes the report plan meet your needs?\nPass 'true' to approve the report plan.\nOr, provide feedback to regenerate the report plan:"""
+    
+    feedback = interrupt(interrupt_message)
 
-    action_request = ActionRequest(
-        action="Confirm report plan",
-        args={"report_plan": interrupt_message},
-    )
-
-    interrupt_config = HumanInterruptConfig(
-        allow_ignore=True,  # Allow the user to `ignore` the interrupt.
-        allow_respond=True,  # Allow the user to `respond` to the interrupt.
-        allow_edit=True,  # Allow the user to `edit` the interrupt's args.
-        allow_accept=True,  # Allow the user to `accept` the interrupt's args.
-    )
-
-    description = (
-        "# Confirm Report Plan"
-        + "Please carefully review the report plan and provide feedback on whether it meets your needs. "
-        + "If you accept, it will kick off section writing. "
-        + "If you edit and submit, the edited report will be used to generate the sections."
-        + "If you ignore, the report will not be generated."
-        "If you respond, the response will be used to generate new report plan"
-    )
-
-    request = HumanInterrupt(
-        action_request=action_request, config=interrupt_config, description=description
-    )
-
-    human_response: HumanResponse = interrupt([request])[0]
-
-    if human_response.get("type") == "response":
-        # If the user provides feedback, regenerate the report plan
-        return Command(
-            goto="generate_report_plan",
-            update={"feedback_on_report_plan": human_response.get("args")},
-        )
-    elif human_response.get("type") == "accept":
-        # If the user approves the report plan, kick off section writing
-        return Command(
-            goto=[
-                Send(
-                    "build_section_with_web_research",
-                    {"topic": topic, "section": s, "search_iterations": 0},
-                )
-                for s in sections
-                if s.research
-            ]
-        )
-    elif human_response.get("type") == "ignore":
-        # If the user ignores the report plan, raise an error
-        raise ValueError(
-            "Report plan ignored. Please provide feedback to regenerate the report plan."
-        )
-    elif human_response.get("type") == "edit": # TODO: it should conttinue with build_section_with_web_research
-        # If the user edits the report plan, update the report plan
-        return Command(
-            goto="generate_report_plan",
-            update={"feedback_on_report_plan": human_response.get("args")},
-        )
+    # If the user approves the report plan, kick off section writing
+    if isinstance(feedback, bool) and feedback is True:
+        # Treat this as approve and kick off section writing
+        return Command(goto=[
+            Send("build_section_with_web_research", {"topic": topic, "section": s, "search_iterations": 0}) 
+            for s in sections 
+            if s.research
+        ])
+    
+    # If the user provides feedback, regenerate the report plan 
+    elif isinstance(feedback, str):
+        # Treat this as feedback
+        return Command(goto="generate_report_plan", 
+                       update={"feedback_on_report_plan": feedback})
     else:
-        raise TypeError(
-            f"Interrupt value of type {type(human_response)} is not supported."
-        )
-
+        raise TypeError(f"Interrupt value of type {type(feedback)} is not supported.")
     
 def generate_queries(state: SectionState, config: RunnableConfig):
     """Generate search queries for researching a specific section.
