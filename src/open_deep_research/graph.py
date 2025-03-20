@@ -132,7 +132,7 @@ async def generate_report_plan(state: ReportState, config: RunnableConfig):
     sections = report_sections.sections
 
     return {
-        "messages": [AIMessage(content=str(report_sections))], # needed - without it human_feedback is not showing 
+        "messages": [AIMessage(content="Initial report plan generated.")],
         "topic": topic,
         "sections": sections
     }
