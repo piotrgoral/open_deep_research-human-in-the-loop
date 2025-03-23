@@ -1,4 +1,5 @@
 from typing import Literal
+import time
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
@@ -96,7 +97,7 @@ async def generate_report_plan(state: ReportState, config: RunnableConfig):
     # Web search
     query_list = [query.search_query for query in results.queries]
 
-    # Search the web with parameters
+    # Search the web with parameters # TODO: after this we have msg in the UI
     source_str = await select_and_execute_search(search_api, query_list, params_to_pass)
 
     # Format system instructions
@@ -131,23 +132,32 @@ async def generate_report_plan(state: ReportState, config: RunnableConfig):
     # Get sections
     sections = report_sections.sections
 
-    return {
-        "messages": [AIMessage(content="Initial report plan generated.")],
-        "topic": topic,
-        "sections": sections
-    }
+    time.sleep(5) # to show the plan in the UI
+
+    return Command(
+        goto=[
+            Send("build_section_with_web_research", {"topic": topic, "section": s, "search_iterations": 0}) 
+            for s in sections 
+            if s.research
+        ],
+        update={
+            "topic": topic,
+            "sections": sections,
+        }
+        )
+
 
 def human_feedback(
     state: ReportState, config: RunnableConfig
 ) -> Command[Literal["generate_report_plan", "build_section_with_web_research"]]:
-    """Get human feedback on the report plan and route to next steps.
+    """Get human feedback on the report and route to next steps.
 
     This node:
-    1. Formats the current report plan for human review
+    1. Formats the current report for human review
     2. Gets feedback via an interrupt
     3. Routes to either:
-       - Section writing if plan is approved
-       - Plan regeneration if feedback is provided
+       - Section writing if report is approved
+       - Report regeneration if feedback is provided
 
     Args:
         state: Current graph state with sections to review
@@ -158,19 +168,12 @@ def human_feedback(
     """
 
     # Get sections
-    topic = state["topic"]
-    sections = state["sections"]
-    sections_str = "\n\n".join(
-        f"Section: {section.name}\n"
-        f"Description: {section.description}\n"
-        f"Research needed: {'Yes' if section.research else 'No'}\n"
-        for section in sections
-    )
+    sections_str = state["final_report"]
 
     # Get feedback on the report plan from interrupt
-    interrupt_message = f"""Please provide feedback on the following report plan. 
+    interrupt_message = f"""Please provide feedback on the following report. 
                         \n\n{sections_str}\n
-                        \nDoes the report plan meet your needs?\nPass 'true' to approve the report plan.\nOr, provide feedback to regenerate the report plan:"""
+                        \nDoes the report meet your needs?\nPass 'true' to approve the report.\nOr, provide feedback to regenerate the report:"""
 
     action_request = ActionRequest(
         action="Confirm report plan",
@@ -185,12 +188,12 @@ def human_feedback(
     )
 
     description = (
-        "# Confirm Report Plan"
-        + "Please carefully review the report plan and provide feedback on whether it meets your needs. "
+        "# Confirm Report"
+        + "Please carefully review the report and provide feedback on whether it meets your needs. "
         + "If you accept, it will kick off section writing. "
         + "If you edit and submit, the edited report will be used to generate the sections."
         + "If you ignore, the report will not be generated."
-        "If you respond, the response will be used to generate new report plan"
+        + "If you respond, the response will be used to generate new report"
     )
 
     request = HumanInterrupt(
@@ -198,6 +201,8 @@ def human_feedback(
     )
 
     human_response: HumanResponse = interrupt([request])[0]
+
+    # print(human_response.get("args")) # {'type': 'accept', 'args': {'action': 'Confirm report plan', 'args': {'report_plan': 'Please provide...'}}}
 
     if human_response.get("type") == "response":
         # If the user provides feedback, regenerate the report plan
@@ -210,11 +215,8 @@ def human_feedback(
         return Command(
             goto=[
                 Send(
-                    "build_section_with_web_research",
-                    {"topic": topic, "section": s, "search_iterations": 0},
+                    END # finish the graph
                 )
-                for s in sections
-                if s.research
             ]
         )
     elif human_response.get("type") == "ignore":
@@ -496,7 +498,7 @@ def initiate_final_section_writing(state: ReportState):
     # Kick off section writing in parallel via Send() API for any sections that do not require research
     return [
         Send("write_final_sections", {"topic": state["topic"], "section": s, "report_sections_from_research": state["report_sections_from_research"]}) 
-        for s in state["sections"] 
+        for s in state["sections"] # TODO FIX: key error: sections
         if not s.research
     ]
 
@@ -526,10 +528,11 @@ builder.add_node("compile_final_report", compile_final_report)
 
 # Add edges
 builder.add_edge(START, "generate_report_plan")
-builder.add_edge("generate_report_plan", "human_feedback")
+#builder.add_edge("generate_report_plan", "human_feedback")
 builder.add_edge("build_section_with_web_research", "gather_completed_sections")
 builder.add_conditional_edges("gather_completed_sections", initiate_final_section_writing, ["write_final_sections"])
 builder.add_edge("write_final_sections", "compile_final_report")
-builder.add_edge("compile_final_report", END)
+builder.add_edge("compile_final_report", "human_feedback")
+builder.add_edge("human_feedback", END)
 
 graph = builder.compile()
